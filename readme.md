@@ -228,6 +228,15 @@ If the service deployed properly, you should now have a Cloudwatch rule configur
 
 You can modify the acceptable values in the cloudformation template.
 
+##### Moving to Production
+When you are ready to integrate your service with your production BigCommerce store, configure the following secrets in the Github repository before merging the staging branch with master:
+
+- BIGCOMMERCE_CLIENT_ID_PROD
+- BIGCOMMERCE_STORE_HASH_PROD
+- BIGCOMMERCE_TOKEN_PROD
+- EXCEPTIONS_EMAIL_ADDRESS_PROD
+- S3_BUCKET_PROD
+
 ### Installation Option 2
 #### Semi-automated deployment with Cloudformation console
 TODO
