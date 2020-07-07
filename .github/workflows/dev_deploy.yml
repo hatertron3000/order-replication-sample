@@ -1,0 +1,45 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [12.x]
+
+    env:
+      STAGE_NAME: dev
+      AWS_DEPLOYMENT_BUCKET: ${{ secrets.S3_BUCKET_DEV }}
+      POLLING_INTERVAL: 120
+      BIGCOMMERCE_STORE_HASH: ${{ secrets.BIGCOMMERCE_STORE_HASH_DEV }}
+      BIGCOMMERCE_TOKEN: ${{ secrets.BIGCOMMERCE_TOKEN_DEV }}
+      BIGCOMMERCE_CLIENT_ID: ${{ secrets.BIGCOMMERCE_CLIENT_ID_DEV }}
+      EXCEPTIONS_EMAIL_ADDRESS: ${{ secrets.EXCEPTIONS_EMAIL_ADDRESS_DEV }}
+
+    steps:
+      - uses: actions/checkout@v2
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Build and upload artifacts
+        run: sh scripts/upload.sh
+      - name: Deploy to AWS CloudFormation
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: OrderReplication-${{ env.STAGE_NAME }}
+          template: cloudformation/stack.json
+          capabilities: CAPABILITY_NAMED_IAM
+          no-fail-on-empty-changeset: 1
+          parameter-overrides: "BigCommerceStoreHash=${{ env.BIGCOMMERCE_STORE_HASH }},StageName=${{ env.STAGE_NAME }},LambdaDeploymentPackagesBucketName=${{ env.AWS_DEPLOYMENT_BUCKET }},BigCommerceToken=${{ env.BIGCOMMERCE_TOKEN }},BigCommerceClientId=${{ env.BIGCOMMERCE_CLIENT_ID }},ExceptionsEmailAddress=${{ env.EXCEPTIONS_EMAIL_ADDRESS }},PollingInterval=${{ env.POLLING_INTERVAL }}"

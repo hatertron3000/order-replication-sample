@@ -1,0 +1,14 @@
+{
+  "name": "new-orders-webhook",
+  "version": "1.0.0",
+  "description": "OrdersETL-NewOrdersListener",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Patrick Puente",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node-bigcommerce": "^4.1.0"
+  }
+}

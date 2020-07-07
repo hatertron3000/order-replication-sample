@@ -1,0 +1,1043 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Order Replication Service",
+    "Metadata": {},
+    "Parameters": {
+        "BigCommerceClientId": {
+            "Description": "The BigCommerce Client ID",
+            "Type": "String"
+        },
+        "BigCommerceToken": {
+            "Description": "The BigCommerce Api Token",
+            "Type": "String"
+        },
+        "BigCommerceStoreHash": {
+            "Description": "BigCommerce store identifier",
+            "Type": "String"
+        },
+        "LambdaDeploymentPackagesBucketName": {
+            "Description": "The name of the S3 bucket where Lambda deployment packages are stored.",
+            "Type": "String"
+        },
+        "StageName": {
+            "Type": "String",
+            "Description": "Environment (dev, staging, prod)",
+            "Default": "dev",
+            "AllowedValues": [
+                "dev",
+                "staging",
+                "prod"
+            ]
+        },
+        "ExceptionsEmailAddress": {
+            "Type": "String",
+            "Description": "Email address to recieve notifications when an order reaches the dead letter queue"
+        },
+        "PollingInterval": {
+            "Type": "Number",
+            "AllowedValues": [
+                15,
+                30,
+                60,
+                120,
+                240,
+                480,
+                1440
+            ],
+            "Description": "Frequency in minutes of the Get New Orders polling job."
+        }
+    },
+    "Resources": {
+        "JobsTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "timestamp",
+                        "AttributeType": "N"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "timestamp",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "BillingMode": "PROVISIONED",
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": 1,
+                    "WriteCapacityUnits": 1
+                },
+                "TableName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Jobs"
+                        ]
+                    ]
+                }
+            }
+        },
+        "WebhooksTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "orderId",
+                        "AttributeType": "N"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "orderId",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "BillingMode": "PROVISIONED",
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": 1,
+                    "WriteCapacityUnits": 5
+                },
+                "TableName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Webhooks"
+                        ]
+                    ]
+                }
+            }
+        },
+        "OrdersTable": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {
+                "AttributeDefinitions": [
+                    {
+                        "AttributeName": "id",
+                        "AttributeType": "N"
+                    }
+                ],
+                "KeySchema": [
+                    {
+                        "AttributeName": "id",
+                        "KeyType": "HASH"
+                    }
+                ],
+                "BillingMode": "PROVISIONED",
+                "ProvisionedThroughput": {
+                    "ReadCapacityUnits": 5,
+                    "WriteCapacityUnits": 5
+                },
+                "TableName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Orders"
+                        ]
+                    ]
+                }
+            }
+        },
+        "OrdersDeadLetterQueue": {
+            "Type": "AWS::SQS::Queue",
+            "Properties": {
+                "DelaySeconds": 0,
+                "MaximumMessageSize": 262144,
+                "MessageRetentionPeriod": 1209600,
+                "QueueName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Orders-DeadLetterQueue"
+                        ]
+                    ]
+                },
+                "ReceiveMessageWaitTimeSeconds": 0,
+                "VisibilityTimeout": 30
+            }
+        },
+        "OrdersQueue": {
+            "Type": "AWS::SQS::Queue",
+            "Properties": {
+                "DelaySeconds": 20,
+                "MaximumMessageSize": 262144,
+                "MessageRetentionPeriod": 1209600,
+                "QueueName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Orders"
+                        ]
+                    ]
+                },
+                "ReceiveMessageWaitTimeSeconds": 10,
+                "RedrivePolicy": {
+                    "maxReceiveCount": 20,
+                    "deadLetterTargetArn": {
+                        "Fn::Join": [
+                            ":",
+                            [
+                                "arn:aws:sqs",
+                                {
+                                    "Ref": "AWS::Region"
+                                },
+                                {
+                                    "Ref": "AWS::AccountId"
+                                },
+                                {
+                                    "Fn::GetAtt": [
+                                        "OrdersDeadLetterQueue",
+                                        "QueueName"
+                                    ]
+                                }
+                            ]
+                        ]
+                    }
+                },
+                "VisibilityTimeout": 60
+            }
+        },
+        "PublishExceptionPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "sns:Publish",
+                            "Resource": {
+                                "Ref": "ExceptionsTopic"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "PutJobsPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "dynamodb:PutItem",
+                            "Resource": {
+                                "Fn::Join": [
+                                    ":",
+                                    [
+                                        "arn:aws:dynamodb",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        {
+                                            "Ref": "AWS::AccountId"
+                                        },
+                                        {
+                                            "Fn::Join": [
+                                                "/",
+                                                [
+                                                    "table",
+                                                    {
+                                                        "Ref": "JobsTable"
+                                                    }
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "ManagedPolicyName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "PutJobs"
+                        ]
+                    ]
+                }
+            }
+        },
+        "PutOrdersPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "dynamodb:PutItem",
+                            "Resource": {
+                                "Fn::Join": [
+                                    ":",
+                                    [
+                                        "arn:aws:dynamodb",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        {
+                                            "Ref": "AWS::AccountId"
+                                        },
+                                        {
+                                            "Fn::Join": [
+                                                "/",
+                                                [
+                                                    "table",
+                                                    {
+                                                        "Ref": "OrdersTable"
+                                                    }
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "ManagedPolicyName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "PutOrders"
+                        ]
+                    ]
+                }
+            }
+        },
+        "PutWebhooksPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "dynamodb:PutItem",
+                            "Resource": {
+                                "Fn::Join": [
+                                    ":",
+                                    [
+                                        "arn:aws:dynamodb",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        {
+                                            "Ref": "AWS::AccountId"
+                                        },
+                                        {
+                                            "Fn::Join": [
+                                                "/",
+                                                [
+                                                    "table",
+                                                    {
+                                                        "Ref": "WebhooksTable"
+                                                    }
+                                                ]
+                                            ]
+                                        }
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "ManagedPolicyName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "PutWebhooks"
+                        ]
+                    ]
+                }
+            }
+        },
+        "SendOrderMessagePolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": "sqs:SendMessage",
+                            "Resource": {
+                                "Fn::Join": [
+                                    ":",
+                                    [
+                                        "arn:aws:sqs",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        {
+                                            "Ref": "AWS::AccountId"
+                                        },
+                                        {
+                                            "Fn::GetAtt": [
+                                                "OrdersQueue",
+                                                "QueueName"
+                                            ]
+                                        }
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "ManagedPolicyName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "SendOrderMessage"
+                        ]
+                    ]
+                }
+            }
+        },
+        "ReceiveOrderMessagePolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "sqs:DeleteMessage",
+                                "sqs:ReceiveMessage",
+                                "sqs:GetQueueAttributes"
+                            ],
+                            "Resource": {
+                                "Fn::Join": [
+                                    ":",
+                                    [
+                                        "arn:aws:sqs",
+                                        {
+                                            "Ref": "AWS::Region"
+                                        },
+                                        {
+                                            "Ref": "AWS::AccountId"
+                                        },
+                                        {
+                                            "Fn::GetAtt": [
+                                                "OrdersQueue",
+                                                "QueueName"
+                                            ]
+                                        }
+                                    ]
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "ManagedPolicyName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "ReceiveOrderMessage"
+                        ]
+                    ]
+                }
+            }
+        },
+        "GetOrdersRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "RoleName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "GetOrders"
+                        ]
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    {
+                        "Ref": "SendOrderMessagePolicy"
+                    },
+                    {
+                        "Ref": "PutJobsPolicy"
+                    },
+                    {
+                        "Ref": "PublishExceptionPolicy"
+                    }
+                ]
+            }
+        },
+        "ProcessOrdersRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "RoleName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "ProcessOrders"
+                        ]
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    {
+                        "Ref": "ReceiveOrderMessagePolicy"
+                    },
+                    {
+                        "Ref": "PutOrdersPolicy"
+                    }
+                ]
+            }
+        },
+        "CartConvertedWebhookRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "lambda.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "RoleName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "CartConvertedWebhook"
+                        ]
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+                    {
+                        "Ref": "SendOrderMessagePolicy"
+                    },
+                    {
+                        "Ref": "PutWebhooksPolicy"
+                    },
+                    {
+                        "Ref": "PublishExceptionPolicy"
+                    }
+                ]
+            }
+        },
+        "GetOrdersFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaDeploymentPackagesBucketName"
+                    },
+                    "S3Key": "get-new-orders.zip"
+                },
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "GetOrdersRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs12.x",
+                "FunctionName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "GetNewOrders"
+                        ]
+                    ]
+                },
+                "MemorySize": 128,
+                "Timeout": 300,
+                "ReservedConcurrentExecutions": 1,
+                "Environment": {
+                    "Variables": {
+                        "CLIENT_ID": {
+                            "Ref": "BigCommerceClientId"
+                        },
+                        "TOKEN": {
+                            "Ref": "BigCommerceToken"
+                        },
+                        "SQS_QUEUE_URL": {
+                            "Ref": "OrdersQueue"
+                        },
+                        "TABLE": {
+                            "Ref": "JobsTable"
+                        },
+                        "STORE_HASH": {
+                            "Ref": "BigCommerceStoreHash"
+                        },
+                        "SNS_TOPIC_ARN": {
+                            "Ref": "ExceptionsTopic"
+                        }
+                    }
+                },
+                "Description": "Gets new orders from BigCommerce, then creates messages in SQS"
+            }
+        },
+        "ProcessOrdersFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaDeploymentPackagesBucketName"
+                    },
+                    "S3Key": "process-new-orders.zip"
+                },
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "ProcessOrdersRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs12.x",
+                "FunctionName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "ProcessOrders"
+                        ]
+                    ]
+                },
+                "MemorySize": 128,
+                "Timeout": 60,
+                "ReservedConcurrentExecutions": 3,
+                "Environment": {
+                    "Variables": {
+                        "CLIENT_ID": {
+                            "Ref": "BigCommerceClientId"
+                        },
+                        "TOKEN": {
+                            "Ref": "BigCommerceToken"
+                        },
+                        "SQS_QUEUE_URL": {
+                            "Ref": "OrdersQueue"
+                        },
+                        "TABLE": {
+                            "Ref": "OrdersTable"
+                        },
+                        "STORE_HASH": {
+                            "Ref": "BigCommerceStoreHash"
+                        },
+                        "SNS_TOPIC_ARN": {
+                            "Ref": "ExceptionsTopic"
+                        }
+                    }
+                },
+                "Description": "Receives order messages from SQS, stores orders in DynamoDB, and updates the order status in BC."
+            }
+        },
+        "ProcessOrdersEventSource": {
+            "Type": "AWS::Lambda::EventSourceMapping",
+            "Properties": {
+                "BatchSize": 10,
+                "Enabled": true,
+                "EventSourceArn": {
+                    "Fn::Join": [
+                        ":",
+                        [
+                            "arn:aws:sqs",
+                            {
+                                "Ref": "AWS::Region"
+                            },
+                            {
+                                "Ref": "AWS::AccountId"
+                            },
+                            {
+                                "Fn::GetAtt": [
+                                    "OrdersQueue",
+                                    "QueueName"
+                                ]
+                            }
+                        ]
+                    ]
+                },
+                "FunctionName": {
+                    "Ref": "ProcessOrdersFunction"
+                }
+            }
+        },
+        "CartConvertedWebhookFunction": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "Code": {
+                    "S3Bucket": {
+                        "Ref": "LambdaDeploymentPackagesBucketName"
+                    },
+                    "S3Key": "new-orders-webhook.zip"
+                },
+                "Handler": "index.handler",
+                "Role": {
+                    "Fn::GetAtt": [
+                        "CartConvertedWebhookRole",
+                        "Arn"
+                    ]
+                },
+                "Runtime": "nodejs12.x",
+                "FunctionName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "CartConvertedWebhook"
+                        ]
+                    ]
+                },
+                "MemorySize": 128,
+                "Timeout": 300,
+                "Environment": {
+                    "Variables": {
+                        "CLIENT_ID": {
+                            "Ref": "BigCommerceClientId"
+                        },
+                        "TOKEN": {
+                            "Ref": "BigCommerceToken"
+                        },
+                        "SQS_QUEUE_URL": {
+                            "Ref": "OrdersQueue"
+                        },
+                        "TABLE": {
+                            "Ref": "WebhooksTable"
+                        },
+                        "STORE_HASH": {
+                            "Ref": "BigCommerceStoreHash"
+                        },
+                        "SNS_TOPIC_ARN": {
+                            "Ref": "ExceptionsTopic"
+                        }
+                    }
+                },
+                "Description": "Destination for cart converted webhooks - adds message to SQS queue for processing."
+            }
+        },
+        "WebhooksApi": {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {
+                "Description": "An API to receive webhooks from BigCommerce.",
+                "EndpointConfiguration": {
+                    "Types": [
+                        "REGIONAL"
+                    ]
+                },
+                "Name": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Webhooks"
+                        ]
+                    ]
+                }
+            }
+        },
+        "CartConvertedResource": {
+            "Type": "AWS::ApiGateway::Resource",
+            "Properties": {
+                "ParentId": {
+                    "Fn::GetAtt": [
+                        "WebhooksApi",
+                        "RootResourceId"
+                    ]
+                },
+                "PathPart": "cart-converted",
+                "RestApiId": {
+                    "Ref": "WebhooksApi"
+                }
+            }
+        },
+        "CartConvertedPostMethod": {
+            "Type": "AWS::ApiGateway::Method",
+            "Properties": {
+                "HttpMethod": "POST",
+                "AuthorizationType": "NONE",
+                "Integration": {
+                    "Type": "AWS_PROXY",
+                    "IntegrationHttpMethod": "POST",
+                    "Uri": {
+                        "Fn::Sub": [
+                            "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${lambdaArn}/invocations",
+                            {
+                                "lambdaArn": {
+                                    "Fn::GetAtt": [
+                                        "CartConvertedWebhookFunction",
+                                        "Arn"
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                "ResourceId": {
+                    "Ref": "CartConvertedResource"
+                },
+                "RestApiId": {
+                    "Ref": "WebhooksApi"
+                }
+            }
+        },
+        "WebhooksApiDeployment": {
+            "Type": "AWS::ApiGateway::Deployment",
+            "DependsOn": [
+                "CartConvertedPostMethod"
+            ],
+            "Properties": {
+                "RestApiId": {
+                    "Ref": "WebhooksApi"
+                },
+                "StageName": {
+                    "Ref": "StageName"
+                }
+            }
+        },
+        "CartConvertedWebhookApiInvokePermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "Action": "lambda:InvokeFunction",
+                "FunctionName": {
+                    "Ref": "CartConvertedWebhookFunction"
+                },
+                "Principal": "apigateway.amazonaws.com",
+                "SourceArn": {
+                    "Fn::Sub": [
+                        "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/*/*",
+                        {
+                            "ApiId": {
+                                "Ref": "WebhooksApi"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "ExceptionsTopic": {
+            "Type": "AWS::SNS::Topic",
+            "Properties": {
+                "DisplayName": {
+                    "Fn::Sub": [
+                        "${AWS::StackName}-ApplicationErrors",
+                        {}
+                    ]
+                },
+                "Subscription": [
+                    {
+                        "Endpoint": {
+                            "Ref": "ExceptionsEmailAddress"
+                        },
+                        "Protocol": "email"
+                    }
+                ],
+                "TopicName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "ApplicationErrors"
+                        ]
+                    ]
+                }
+            }
+        },
+        "DeadLettersAlarmTopic": {
+            "Type": "AWS::SNS::Topic",
+            "Properties": {
+                "DisplayName": {
+                    "Fn::Sub": [
+                        "${AWS::StackName}-DeadLettersAlarm",
+                        {}
+                    ]
+                },
+                "Subscription": [
+                    {
+                        "Endpoint": {
+                            "Ref": "ExceptionsEmailAddress"
+                        },
+                        "Protocol": "email"
+                    }
+                ],
+                "TopicName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "DeadLettersAlarm"
+                        ]
+                    ]
+                }
+            }
+        },
+        "OrderDeadLetterQueueAlarm": {
+            "Type": "AWS::CloudWatch::Alarm",
+            "Properties": {
+                "MetricName": "ApproximateNumberOfMessagesVisible",
+                "Namespace": "AWS/SQS",
+                "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+                "EvaluationPeriods": 2,
+                "Period": 60,
+                "Statistic": "Sum",
+                "Threshold": 1,
+                "DatapointsToAlarm": 1,
+                "ActionsEnabled": true,
+                "AlarmActions": [
+                    {
+                        "Ref": "DeadLettersAlarmTopic"
+                    }
+                ],
+                "AlarmDescription": "A new order failed to be processed by the order replication service. Consider increasing message receives (preferable), batch size (preferable), or lambda function concurrency (not preferred).",
+                "AlarmName": {
+                    "Fn::Join": [
+                        "-",
+                        [
+                            {
+                                "Ref": "AWS::StackName"
+                            },
+                            "Dead Letter Queue Message Count > 0"
+                        ]
+                    ]
+                },
+                "Dimensions": [
+                    {
+                        "Name": "QueueName",
+                        "Value": {
+                            "Fn::GetAtt": [
+                                "OrdersDeadLetterQueue",
+                                "QueueName"
+                            ]
+                        }
+                    }
+                ],
+                "InsufficientDataActions": [],
+                "OKActions": []
+            }
+        },
+        "PollForNewOrdersRule": {
+            "Type": "AWS::Events::Rule",
+            "Properties": {
+                "Description": "Scheduled event to poll for orders in a \"new\" state.",
+                "ScheduleExpression": {
+                    "Fn::Sub": [
+                        "rate(${pollingInterval} minutes)",
+                        {
+                            "pollingInterval": {
+                                "Ref": "PollingInterval"
+                            }
+                        }
+                    ]
+                },
+                "State": "ENABLED",
+                "Targets": [
+                    {
+                        "Arn": {
+                            "Fn::GetAtt": [
+                                "GetOrdersFunction",
+                                "Arn"
+                            ]
+                        },
+                        "Id": {
+                            "Ref": "GetOrdersFunction"
+                        }
+                    }
+                ]
+            }
+        },
+        "GetNewOrdersEventInvokePermission": {
+            "Type": "AWS::Lambda::Permission",
+            "Properties": {
+                "FunctionName": {
+                    "Ref": "GetOrdersFunction"
+                },
+                "Action": "lambda:InvokeFunction",
+                "Principal": "events.amazonaws.com",
+                "SourceArn": {
+                    "Fn::GetAtt": [
+                        "PollForNewOrdersRule",
+                        "Arn"
+                    ]
+                }
+            }
+        }
+    },
+    "Outputs": {}
+}

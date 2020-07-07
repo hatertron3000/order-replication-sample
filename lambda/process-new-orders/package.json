@@ -1,0 +1,14 @@
+{
+  "name": "process-new-orders",
+  "version": "1.0.0",
+  "description": "OrdersETL-ProcessOrders Lambda Function",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Patrick Puente",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node-bigcommerce": "^4.1.0"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "get-new-orders",
+  "version": "1.0.0",
+  "description": "OrdersETLGetNewOrder Lambda Function",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm install ;zip -r archive`date +%s`.zip ."
+  },
+  "author": "Patrick Puente",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "node-bigcommerce": "^4.1.0"
+  }
+}

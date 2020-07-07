@@ -1,0 +1,22 @@
+{
+  "name": "bigcommerce-order-replication",
+  "version": "1.0.0",
+  "description": "An order replication service built on AWS.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "scripts/build.sh",
+    "deploy": "scripts/deploy.sh",
+    "create-stack": "scripts/create-stack.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatertron3000/OrdersETL.git"
+  },
+  "author": "Patrick Puente",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/hatertron3000/OrdersETL/issues"
+  },
+  "homepage": "https://github.com/hatertron3000/OrdersETL#readme"
+}
