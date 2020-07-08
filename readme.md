@@ -361,7 +361,7 @@ To test the webhook, send a POST request to your API with the following body or 
 Review the Cloudwatch logs for the CartConvertedWebhookFunction Lambda function for the results. If the webhook is processed successfully, you should see a new item in the Webhooks table in DynamoDB, and the order should be added to the Orders table in DynamoDB.
 
 ## Architecture
-![Architecture Diagram](readme_assets\architecture.png)
+![Architecture Diagram](readme_assets/architecture.png)
 _Not pictured: IAM, API Gateway Resources/Methods/Stages_
 
 ### Resources Utilized
