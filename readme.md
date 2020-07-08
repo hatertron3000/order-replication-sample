@@ -33,7 +33,7 @@ The service also exposes an API which can receive the _store/cart/converted_ [we
 
 
 ## Setup
-Regardless of your chosen deployment option, you will need to create an S3 bucket to store the lambda deployment packages, and you will need to generate BigCommerce API credentials.
+Regardless of your chosen deployment option, you will need to create an S3 bucket to store the lambda deployment packages, and you will need to generate BigCommerce API credentials. Once you have completed these setup steps, choose deployment option 1 or option 2. If you want to set up continuous deployment from your Github repo to your AWS account, use option 1. If you prefer to manually upload the CloudFormation template, skip to option 2.
 
 ##### Create an S3 bucket
 The build scripts upload Lambda deployment packages to an S3 bucket which CloudFormation will use to deploy the Lambda functions. The creation of the deployment bucket is not automated (yet, see issue #4), so you must first create one using the AWS console, CLI, or SDK. You may configure versioning and logging as you see fit, and the bucket should block all public access.
@@ -225,11 +225,14 @@ git clone https://github.com/hatertron3000/order-replication-sample
 cd order-replication-sample
 git remote rm origin
 git remote add origin https://github.com/<YOUR_GITHUB_USERNAME>/<your-repo-name>.git
+git checkout -b staging
 git push -u origin staging
 ```
 
+These commands will clone the sample app, remove the origin, add your repository as the origin, then publish a new branch named _staging_. 
+
 ##### Magic
-After making your initial commit to the staging branch, Github will execute the workflow in `.github/workflows/staging_deploy.yml`. To check the workflow status, watch job progress, and review logs, navigate to _Actions_ in your repo:  `https://github.com/<YOUR-GITHUB-USERNAME>/<your-repo-name>/actions`
+After making you push your staging branch, Github will execute the workflow in `.github/workflows/staging_deploy.yml`. To check the workflow status, watch job progress, and review logs, navigate to _Actions_ in your repo:  `https://github.com/<YOUR-GITHUB-USERNAME>/<your-repo-name>/actions`
 
 When the _build (12.x)_ job in the Deploy to Staging workflow gets to the _Deploy to AWS CloudFormation_ step, you can watch the stack creation progress and review logs in your AWS CloudFormation console.
 
@@ -271,6 +274,8 @@ When you are ready to integrate your service with your production BigCommerce st
 - BIGCOMMERCE_TOKEN_PROD
 - EXCEPTIONS_EMAIL_ADDRESS_PROD
 - S3_BUCKET_PROD
+
+After creating your master branch, be sure to configure your repository's branch settings to use master as the default branch.
 
 ### Deployment Option 2
 #### Deploy from the CloudFormation Console
@@ -319,7 +324,7 @@ To configure the webhook, first retrieve the URL for your API. To retrieve the U
 4. Click the _POST_ method under _/cart-converted_
 5. Copy the Invoke URL (e.g. https://\<API-ID>.execute-api.\<REGION>.amazonaws.com/\<STAGE-NAME>/cart-converted)
 
-Use the URL to create a webhook by sending a POST request to the [BigCommerce Webooks API](https://developer.bigcommerce.com/api-reference/webhooks/webhooks/createwebhooks) at `https://api.bigcommerce.com/stores/<STORE_HASH>/v2/hooks` with the following headers and body:
+Use the URL to create a webhook by sending a POST request to the [BigCommerce Webhooks API](https://developer.bigcommerce.com/api-reference/webhooks/webhooks/createwebhooks) at `https://api.bigcommerce.com/stores/<STORE_HASH>/v2/hooks` with the following headers and body:
 ```
 X-Auth-Client: <YOUR_BIGCOMMERCE_CLIENT_ID>
 X-Auth-Token: <YOUR_BIGCOMMERCE_API_TOKEN>
