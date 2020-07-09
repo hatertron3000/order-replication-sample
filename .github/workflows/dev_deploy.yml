@@ -34,7 +34,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Build and upload artifacts
-        run: sh scripts/upload.sh
+        run: sh scripts/upload.sh ${{ env.AWS_DEPLOYMENT_BUCKET }}
       - name: Deploy to AWS CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
