@@ -286,6 +286,10 @@ The sample app comes with bash scripts to generate .zip files for each lambda fu
 sh scripts/build.sh
 ```
 
+You may then manually upload the .zip files in `build/` to your S3 deployment bucket.
+
+If you have the AWS CLI installed and configured with PutObject access to your S3 bucket, you may alternatively run `sh scripts/upload.sh <YOUR_S3_BUCKET>` to create the deployment packages and upload them.
+
 If your development environment does not support bash or you prefer to manually create the deployment packages, first run `npm install` in each of the folders in the `lambda` directory to install dependencies before creating a .zip file with the contents of each of those folders. Those files must be named `get-new-orders`, `new-orders-webhook`, and `process-new-orders` respectively. Make sure not to include the top-level folders in your .zip files, just the folder contents.
 
 Example: 

@@ -14,7 +14,6 @@ jobs:
 
     env:
       STAGE_NAME: prod
-      AWS_DEPLOYMENT_BUCKET: ${{ secrets.S3_BUCKET_PROD }}
       POLLING_INTERVAL: 480
       BIGCOMMERCE_STORE_HASH: ${{ secrets.BIGCOMMERCE_STORE_HASH_PROD }}
       BIGCOMMERCE_TOKEN: ${{ secrets.BIGCOMMERCE_TOKEN_PROD }}
@@ -34,7 +33,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
       - name: Build and upload artifacts
-        run: sh scripts/upload.sh
+        run: sh scripts/upload.sh ${{ secrets.S3_BUCKET_PROD }}
       - name: Deploy to AWS CloudFormation
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
